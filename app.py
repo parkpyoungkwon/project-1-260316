@@ -37,6 +37,14 @@ COLORS = {
 }
 
 
+def rerun_app():
+    """Streamlit 버전에 따라 rerun API 호환."""
+    if hasattr(st, "rerun"):
+        st.rerun()
+    elif hasattr(st, "experimental_rerun"):
+        st.experimental_rerun()
+
+
 # ==== 유틸 함수 ====
 def rotate(shape: List[List[int]]) -> List[List[int]]:
     """시계 방향 회전."""
@@ -100,6 +108,9 @@ def init_state():
     st.session_state.lines = 0
     st.session_state.game_over = False
     st.session_state.last_tick = time.time()
+    # 착지 후 잠깐 이동/회전 허용을 위한 락 딜레이 상태
+    st.session_state.lock_pending = False
+    st.session_state.lock_start = 0.0
 
 
 def draw_board():
@@ -166,8 +177,12 @@ def lock_piece():
     st.session_state.board, cleared = clear_lines(st.session_state.board)
     if cleared:
         st.session_state.lines += cleared
-        st.session_state.score += (cleared ** 2) * 100
+        st.session_state.score += (cleared ** 2) * 120  # 조금 더 공격적인 점수
         st.session_state.level = 1 + st.session_state.lines // 10
+
+    # 다음 블록을 위해 락 딜레이 상태 초기화
+    st.session_state.lock_pending = False
+    st.session_state.lock_start = 0.0
 
     shape, row, col, color_id = spawn_piece()
     if not can_move(st.session_state.board, shape, row, col):
@@ -182,7 +197,7 @@ def lock_piece():
 def tick():
     if st.session_state.game_over:
         return
-    fall_interval = max(0.15, 0.8 - (st.session_state.level - 1) * 0.07)
+    fall_interval = max(0.12, 0.8 - (st.session_state.level - 1) * 0.06)
     now = time.time()
     if now - st.session_state.last_tick < fall_interval:
         return
@@ -195,20 +210,30 @@ def tick():
         st.session_state.current_col,
     ):
         st.session_state.current_row += 1
+        # 한 칸이라도 내려가면 다시 락 딜레이 초기화
+        st.session_state.lock_pending = False
+        st.session_state.lock_start = 0.0
     else:
-        lock_piece()
+        # 바닥에 닿은 뒤 잠깐 동안 좌우 이동/회전 허용
+        lock_delay = 0.4  # 초 단위, 한 번 움직일 정도의 짧은 여유
+        if not st.session_state.lock_pending:
+            st.session_state.lock_pending = True
+            st.session_state.lock_start = now
+        elif now - st.session_state.lock_start >= lock_delay:
+            lock_piece()
 
 
 def main():
     st.set_page_config(page_title="클래식 테트리스", page_icon="🎮")
     st.title("🎮 클래식 테트리스 (Streamlit)")
-    st.write("초중급용 간단 테트리스입니다. 방향 버튼으로 조작하세요.")
+    st.write(
+        "초중급용 테트리스입니다. 바닥에 닿았을 때 살짝 좌우로 미끄러뜨릴 수 있게 만들어 더 역동적으로 플레이할 수 있어요."
+    )
 
     if "board" not in st.session_state:
         init_state()
 
     # 자동 tick
-    st_autorefresh = st.experimental_rerun  # placeholder for mypy; 실제로는 아래에서 사용 안 함
     st.experimental_set_query_params(ts=str(time.time()))
     tick()
 
@@ -223,7 +248,7 @@ def main():
 
         if st.button("새 게임 시작"):
             init_state()
-            st.experimental_rerun()
+            rerun_app()
 
         st.markdown("---")
         st.subheader("조작")
@@ -237,6 +262,9 @@ def main():
                     st.session_state.current_col - 1,
                 ):
                     st.session_state.current_col -= 1
+                    # 좌우 이동에 성공하면 락 딜레이를 다시 부여
+                    if st.session_state.lock_pending:
+                        st.session_state.lock_start = time.time()
         with c2:
             if st.button("⏫ 회전"):
                 new_shape = rotate(st.session_state.current_shape)
@@ -247,6 +275,8 @@ def main():
                     st.session_state.current_col,
                 ):
                     st.session_state.current_shape = new_shape
+                    if st.session_state.lock_pending:
+                        st.session_state.lock_start = time.time()
         with c3:
             if st.button("➡️ 우"):
                 if can_move(
@@ -256,6 +286,8 @@ def main():
                     st.session_state.current_col + 1,
                 ):
                     st.session_state.current_col += 1
+                    if st.session_state.lock_pending:
+                        st.session_state.lock_start = time.time()
 
         c4, c5 = st.columns(2)
         with c4:
@@ -267,8 +299,18 @@ def main():
                     st.session_state.current_col,
                 ):
                     st.session_state.current_row += 1
+                    st.session_state.lock_pending = False
+                    st.session_state.lock_start = 0.0
                 else:
-                    lock_piece()
+                    # 수동 내리기에서도 바닥에 닿으면 한 번의 락 딜레이를 주고,
+                    # 그 이후 다시 내리면 고정
+                    now = time.time()
+                    lock_delay = 0.4
+                    if not st.session_state.lock_pending:
+                        st.session_state.lock_pending = True
+                        st.session_state.lock_start = now
+                    elif now - st.session_state.lock_start >= lock_delay:
+                        lock_piece()
         with c5:
             if st.button("⤵️ 하드 드롭"):
                 hard_drop()
