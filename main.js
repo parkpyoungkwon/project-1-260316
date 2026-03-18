@@ -73,6 +73,10 @@ const LOCK_DELAY_MS = 400;
 let lockPending = false;
 let lockStartTs = 0;
 
+// ----- 라인 클리어 효과(폭죽) -----
+const EFFECT_DURATION_MS = 500;
+let effects = [];
+
 // 캔버스
 const boardCanvas = document.getElementById("board");
 const boardCtx = boardCanvas.getContext("2d");
@@ -154,8 +158,9 @@ function mergePiece(piece) {
   }
 }
 
-function clearLines() {
+function clearLines(colorForEffect) {
   let cleared = 0;
+  const clearedRows = [];
   outer: for (let r = ROWS - 1; r >= 0; r--) {
     for (let c = 0; c < COLS; c++) {
       if (board[r][c] === 0) {
@@ -163,6 +168,7 @@ function clearLines() {
       }
     }
     // 가득 찬 줄
+    clearedRows.push(r);
     board.splice(r, 1);
     board.unshift(Array(COLS).fill(0));
     cleared++;
@@ -177,6 +183,7 @@ function clearLines() {
   }
 
   updateStats();
+  return { cleared, clearedRows, colorForEffect };
 }
 
 function hardDrop() {
@@ -187,7 +194,8 @@ function hardDrop() {
     current.row += 1;
   }
   mergePiece(current);
-  clearLines();
+  const res = clearLines(current.color);
+  if (res.cleared > 0) spawnFirework(res.cleared, res.clearedRows, res.colorForEffect);
   spawnNextPiece();
 }
 
@@ -214,6 +222,53 @@ function spawnNextPiece() {
   }
 }
 
+function spawnFirework(cleared, clearedRows, colorId) {
+  const particlesByCleared = {
+    1: 16,
+    2: 30,
+    3: 42,
+    4: 52,
+  };
+  const totalParticles = particlesByCleared[Math.min(4, cleared)] || 32;
+  const rowsCount = Math.max(1, clearedRows.length);
+  const perRow = Math.floor(totalParticles / rowsCount);
+
+  const baseX = (COLS / 2) * BLOCK_SIZE;
+  const baseYJitter = BLOCK_SIZE * 0.15;
+
+  const color = COLORS[colorId] || "#ffffff";
+  const nowTs = performance.now();
+  const gravity = BLOCK_SIZE * 4.2;
+
+  const effect = {
+    startTs: nowTs,
+    duration: EFFECT_DURATION_MS,
+    particles: [],
+  };
+
+  for (const rowIdx of clearedRows) {
+    const cx = baseX + (Math.random() * 0.6 - 0.3) * BLOCK_SIZE;
+    const cy = rowIdx * BLOCK_SIZE + BLOCK_SIZE / 2 + (Math.random() * 2 - 1) * baseYJitter;
+    for (let i = 0; i < perRow; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const speedMul = 0.8 + Math.random() * (0.9 + cleared * 0.15);
+      const speed = (BLOCK_SIZE / 10) * speedMul;
+      const p = {
+        x0: cx,
+        y0: cy,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed * 0.85,
+        g: gravity * (0.7 + Math.random() * 0.7),
+        size: 1.8 + Math.random() * 2.4,
+        color,
+      };
+      effect.particles.push(p);
+    }
+  }
+
+  effects.push(effect);
+}
+
 // ----- 렌더링 -----
 function drawCell(ctx, x, y, colorId) {
   const color = COLORS[colorId];
@@ -227,7 +282,7 @@ function drawCell(ctx, x, y, colorId) {
   }
 }
 
-function drawBoard() {
+function drawBoard(nowTs) {
   boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
 
   // 고정 블록
@@ -248,6 +303,38 @@ function drawBoard() {
       }
     }
   }
+
+  // 폭죽 효과(블록 위)
+  drawEffects(nowTs);
+}
+
+function drawEffects(nowTs) {
+  if (!effects.length) return;
+  const nextEffects = [];
+
+  for (const e of effects) {
+    const age = nowTs - e.startTs;
+    if (age > e.duration) continue;
+    nextEffects.push(e);
+
+    const t = age / e.duration; // 0..1
+    const alpha = Math.max(0, 1 - t);
+
+    for (const p of e.particles) {
+      const dt = age / 1000; // seconds
+      const x = p.x0 + p.vx * dt;
+      const y = p.y0 + p.vy * dt + 0.5 * p.g * dt * dt;
+      if (y < -10 || y > boardCanvas.height + 10) continue;
+
+      boardCtx.globalAlpha = alpha * 0.95;
+      boardCtx.fillStyle = p.color;
+      const s = p.size * (0.65 + alpha * 0.9);
+      boardCtx.fillRect(x, y, s, s);
+    }
+  }
+
+  boardCtx.globalAlpha = 1.0;
+  effects = nextEffects;
 }
 
 function drawNext() {
@@ -316,13 +403,14 @@ function tick(timestamp) {
       } else if (timestamp - lockStartTs >= LOCK_DELAY_MS) {
         lockPending = false;
         mergePiece(current);
-        clearLines();
+        const res = clearLines(current.color);
+        if (res.cleared > 0) spawnFirework(res.cleared, res.clearedRows, res.colorForEffect);
         spawnNextPiece();
       }
     }
   }
 
-  drawBoard();
+  drawBoard(timestamp);
   drawNext();
 
   requestAnimationFrame(tick);
@@ -345,6 +433,16 @@ function handleKeydown(e) {
 
   if (isPaused) return;
   if (!current) return;
+
+  // 브라우저 스크롤/화면 이동 방지: 화살표 키는 기본 동작이 있을 수 있음
+  if (
+    e.code === "ArrowLeft" ||
+    e.code === "ArrowRight" ||
+    e.code === "ArrowUp" ||
+    e.code === "ArrowDown"
+  ) {
+    e.preventDefault();
+  }
 
   switch (e.code) {
     case "ArrowLeft":
