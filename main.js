@@ -75,6 +75,7 @@ let lockStartTs = 0;
 
 // ----- 라인 클리어 효과(폭죽) -----
 const EFFECT_DURATION_MS = 500;
+const FLASH_DURATION_MS = 180; // 줄이 팍 터지는 짧은 플래시
 let effects = [];
 
 // 캔버스
@@ -88,6 +89,7 @@ const scoreEl = document.getElementById("score");
 const levelEl = document.getElementById("level");
 const linesEl = document.getElementById("lines");
 const restartBtn = document.getElementById("restart-btn");
+const pauseBtn = document.getElementById("pause-btn");
 const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlay-title");
 const overlayText = document.getElementById("overlay-text");
@@ -223,13 +225,14 @@ function spawnNextPiece() {
 }
 
 function spawnFirework(cleared, clearedRows, colorId) {
+  // cleared 개수가 늘수록 “팍” 하고 더 크게 터지게
   const particlesByCleared = {
-    1: 16,
-    2: 30,
-    3: 42,
-    4: 52,
+    1: 46,
+    2: 110,
+    3: 175,
+    4: 240,
   };
-  const totalParticles = particlesByCleared[Math.min(4, cleared)] || 32;
+  const totalParticles = particlesByCleared[Math.min(4, cleared)] || 80;
   const rowsCount = Math.max(1, clearedRows.length);
   const perRow = Math.floor(totalParticles / rowsCount);
 
@@ -239,11 +242,16 @@ function spawnFirework(cleared, clearedRows, colorId) {
   const color = COLORS[colorId] || "#ffffff";
   const nowTs = performance.now();
   const gravity = BLOCK_SIZE * 4.2;
+  // 플래시 세기: 1줄 약하게, 2~3줄 확실히 크게
+  const flashStrength = Math.min(1, 0.25 + cleared * 0.18); // 1->0.43, 2->0.61, 3->0.79, 4->0.97
 
   const effect = {
     startTs: nowTs,
     duration: EFFECT_DURATION_MS,
     particles: [],
+    flashRows: clearedRows.slice(),
+    flashStrength,
+    colorId,
   };
 
   for (const rowIdx of clearedRows) {
@@ -251,15 +259,15 @@ function spawnFirework(cleared, clearedRows, colorId) {
     const cy = rowIdx * BLOCK_SIZE + BLOCK_SIZE / 2 + (Math.random() * 2 - 1) * baseYJitter;
     for (let i = 0; i < perRow; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speedMul = 0.8 + Math.random() * (0.9 + cleared * 0.15);
-      const speed = (BLOCK_SIZE / 10) * speedMul;
+      const speedMul = 1.25 + Math.random() * (1.0 + cleared * 0.25);
+      const speed = (BLOCK_SIZE / 7) * speedMul;
       const p = {
         x0: cx,
         y0: cy,
         vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed * 0.85,
+        vy: Math.sin(angle) * speed * 0.92,
         g: gravity * (0.7 + Math.random() * 0.7),
-        size: 1.8 + Math.random() * 2.4,
+        size: 2.4 + Math.random() * (2.8 + cleared * 0.25),
         color,
       };
       effect.particles.push(p);
@@ -312,6 +320,9 @@ function drawEffects(nowTs) {
   if (!effects.length) return;
   const nextEffects = [];
 
+  const prevComposite = boardCtx.globalCompositeOperation;
+  boardCtx.globalCompositeOperation = "lighter";
+
   for (const e of effects) {
     const age = nowTs - e.startTs;
     if (age > e.duration) continue;
@@ -320,20 +331,37 @@ function drawEffects(nowTs) {
     const t = age / e.duration; // 0..1
     const alpha = Math.max(0, 1 - t);
 
+    // 짧은 플래시(“팍”)
+    if (age <= FLASH_DURATION_MS) {
+      const ft = age / FLASH_DURATION_MS; // 0..1
+      const a = (1 - ft) * 0.52 * e.flashStrength;
+      boardCtx.globalAlpha = a;
+      boardCtx.fillStyle = COLORS[e.colorId] || "#ffffff";
+      for (const r of e.flashRows) {
+        // 줄 폭만큼 크게 칠해서 팍 터지는 느낌
+        boardCtx.fillRect(0, r * BLOCK_SIZE, boardCanvas.width, BLOCK_SIZE);
+      }
+    }
+
     for (const p of e.particles) {
       const dt = age / 1000; // seconds
       const x = p.x0 + p.vx * dt;
       const y = p.y0 + p.vy * dt + 0.5 * p.g * dt * dt;
       if (y < -10 || y > boardCanvas.height + 10) continue;
 
-      boardCtx.globalAlpha = alpha * 0.95;
+      const a = Math.min(1, alpha * 1.25);
+      boardCtx.globalAlpha = a;
       boardCtx.fillStyle = p.color;
-      const s = p.size * (0.65 + alpha * 0.9);
-      boardCtx.fillRect(x, y, s, s);
+      const s = p.size * (0.7 + alpha * 0.95);
+      const r = s / 2;
+      boardCtx.beginPath();
+      boardCtx.arc(x + r, y + r, r, 0, Math.PI * 2);
+      boardCtx.fill();
     }
   }
 
   boardCtx.globalAlpha = 1.0;
+  boardCtx.globalCompositeOperation = prevComposite;
   effects = nextEffects;
 }
 
@@ -424,7 +452,7 @@ function handleKeydown(e) {
     // 일시정지 토글
     isPaused = !isPaused;
     if (isPaused) {
-      showOverlay("일시정지", "Enter 키를 다시 누르면 계속합니다.", "계속하기");
+      showOverlay("일시정지", "일시정지 버튼 또는 Enter 키를 누르면 재개합니다.", "재개");
     } else {
       hideOverlay();
     }
@@ -506,6 +534,16 @@ restartBtn.addEventListener("click", () => {
   resetGame();
 });
 
+pauseBtn.addEventListener("click", () => {
+  if (isGameOver) return;
+  isPaused = !isPaused;
+  if (isPaused) {
+    showOverlay("일시정지", "일시정지 버튼 또는 Enter 키를 누르면 재개합니다.", "재개");
+  } else {
+    hideOverlay();
+  }
+});
+
 overlayBtn.addEventListener("click", () => {
   if (isGameOver) {
     resetGame();
@@ -516,6 +554,9 @@ overlayBtn.addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", handleKeydown);
+boardCanvas.addEventListener("click", () => {
+  if (boardCanvas && typeof boardCanvas.focus === "function") boardCanvas.focus();
+});
 
 // ----- 시작 -----
 function start() {
@@ -523,6 +564,10 @@ function start() {
   updateStats();
   spawnNextPiece();
   requestAnimationFrame(tick);
+  // 캔버스가 포커스를 가져야 키 이벤트가 안정적으로 들어옵니다.
+  if (boardCanvas && typeof boardCanvas.focus === "function") {
+    boardCanvas.focus();
+  }
 }
 
 start();
