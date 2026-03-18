@@ -68,6 +68,11 @@ let isPaused = false;
 let dropStart = 0;
 let dropInterval = 800; // ms
 
+// ----- 락 딜레이(바닥에서 좌우/회전 한 번 더) -----
+const LOCK_DELAY_MS = 400;
+let lockPending = false;
+let lockStartTs = 0;
+
 // 캔버스
 const boardCanvas = document.getElementById("board");
 const boardCtx = boardCanvas.getContext("2d");
@@ -176,6 +181,8 @@ function clearLines() {
 
 function hardDrop() {
   if (!current || isGameOver || isPaused) return;
+  // 하드 드롭은 락 딜레이 없이 즉시 고정
+  lockPending = false;
   while (canMove(current, 1, 0)) {
     current.row += 1;
   }
@@ -185,6 +192,10 @@ function hardDrop() {
 }
 
 function spawnNextPiece() {
+  // 새 블록이 스폰되면 락 딜레이 초기화
+  lockPending = false;
+  lockStartTs = 0;
+
   if (!nextPiece) {
     current = randomPiece();
     nextPiece = randomPiece();
@@ -294,10 +305,20 @@ function tick(timestamp) {
     dropStart = timestamp;
     if (current && canMove(current, 1, 0)) {
       current.row += 1;
+      // 바닥에서 다시 뜨면 락 딜레이 리셋
+      lockPending = false;
+      lockStartTs = 0;
     } else if (current) {
-      mergePiece(current);
-      clearLines();
-      spawnNextPiece();
+      // 바닥에 닿았을 때 잠깐 대기 후 고정
+      if (!lockPending) {
+        lockPending = true;
+        lockStartTs = timestamp;
+      } else if (timestamp - lockStartTs >= LOCK_DELAY_MS) {
+        lockPending = false;
+        mergePiece(current);
+        clearLines();
+        spawnNextPiece();
+      }
     }
   }
 
@@ -327,24 +348,34 @@ function handleKeydown(e) {
 
   switch (e.code) {
     case "ArrowLeft":
-      if (canMove(current, 0, -1)) current.col -= 1;
+      if (canMove(current, 0, -1)) {
+        current.col -= 1;
+        if (lockPending) lockStartTs = performance.now();
+      }
       break;
     case "ArrowRight":
-      if (canMove(current, 0, 1)) current.col += 1;
+      if (canMove(current, 0, 1)) {
+        current.col += 1;
+        if (lockPending) lockStartTs = performance.now();
+      }
       break;
     case "ArrowDown":
       if (canMove(current, 1, 0)) {
         current.row += 1;
+        lockPending = false;
+        lockStartTs = 0;
       } else {
-        mergePiece(current);
-        clearLines();
-        spawnNextPiece();
+        if (!lockPending) {
+          lockPending = true;
+          lockStartTs = performance.now();
+        }
       }
       break;
     case "ArrowUp": {
       const rotated = rotate(current.shape);
       if (canMove(current, 0, 0, rotated)) {
         current.shape = rotated;
+        if (lockPending) lockStartTs = performance.now();
       }
       break;
     }
@@ -366,6 +397,8 @@ function resetGame() {
   dropInterval = 800;
   nextPiece = null;
   current = null;
+  lockPending = false;
+  lockStartTs = 0;
   updateStats();
   hideOverlay();
   spawnNextPiece();

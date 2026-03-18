@@ -3,6 +3,7 @@ import time
 from typing import List, Tuple
 
 import streamlit as st
+import streamlit.components.v1 as components
 try:
     from streamlit_autorefresh import st_autorefresh
 except Exception:  # Streamlit Cloud에서 패키지 설치가 실패하면 여기로 올 수 있음
@@ -261,99 +262,30 @@ def tick():
 def main():
     st.set_page_config(page_title="클래식 테트리스", page_icon="🎮")
     st.title("🎮 클래식 테트리스 (Streamlit)")
-    st.write(
-        "초중급용 테트리스입니다. 바닥에 닿았을 때 살짝 좌우로 미끄러뜨릴 수 있게 만들어 더 역동적으로 플레이할 수 있어요."
-    )
+    st.write("브라우저에서 방향키로 조작하는 테트리스입니다. (Streamlit에 HTML/JS 게임 임베드)")
 
-    ensure_state()
+    import pathlib
 
-    # 자동 tick
-    # Streamlit Cloud에서 experimental API가 없을 수 있어 안전하게 처리합니다.
-    # st_autorefresh로 주기적으로 앱을 rerun시키고, tick()은 last_tick/fall_interval로 실제 낙하 속도를 제어합니다.
-    if st_autorefresh is not None:
-        st_autorefresh(interval=100, limit=None, key="tetris_autorefresh")
-    tick()
+    base_dir = pathlib.Path(__file__).parent
+    index_path = base_dir / "index.html"
+    css_path = base_dir / "style.css"
+    js_path = base_dir / "main.js"
 
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        draw_board()
-    with col2:
-        st.subheader("정보")
-        st.write(f"점수: **{st.session_state.score}**")
-        st.write(f"라인: **{st.session_state.lines}**")
-        st.write(f"레벨: **{st.session_state.level}**")
+    if not index_path.exists() or not css_path.exists() or not js_path.exists():
+        st.error("필요한 파일(`index.html`, `style.css`, `main.js`)을 프로젝트 루트에 업로드해 주세요.")
+        return
 
-        if st.button("새 게임 시작"):
-            init_state()
-            rerun_app()
+    index_html = index_path.read_text(encoding="utf-8")
+    css_text = css_path.read_text(encoding="utf-8")
+    js_text = js_path.read_text(encoding="utf-8")
 
-        st.markdown("---")
-        st.subheader("조작")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("⬅️ 좌"):
-                if can_move(
-                    st.session_state.board,
-                    st.session_state.current_shape,
-                    st.session_state.current_row,
-                    st.session_state.current_col - 1,
-                ):
-                    st.session_state.current_col -= 1
-                    # 좌우 이동에 성공하면 락 딜레이를 다시 부여
-                    if st.session_state.lock_pending:
-                        st.session_state.lock_start = time.time()
-        with c2:
-            if st.button("⏫ 회전"):
-                new_shape = rotate(st.session_state.current_shape)
-                if can_move(
-                    st.session_state.board,
-                    new_shape,
-                    st.session_state.current_row,
-                    st.session_state.current_col,
-                ):
-                    st.session_state.current_shape = new_shape
-                    if st.session_state.lock_pending:
-                        st.session_state.lock_start = time.time()
-        with c3:
-            if st.button("➡️ 우"):
-                if can_move(
-                    st.session_state.board,
-                    st.session_state.current_shape,
-                    st.session_state.current_row,
-                    st.session_state.current_col + 1,
-                ):
-                    st.session_state.current_col += 1
-                    if st.session_state.lock_pending:
-                        st.session_state.lock_start = time.time()
+    # 외부 파일 참조를 인라인으로 합쳐 components에서 제대로 동작하게 만듭니다.
+    index_html = index_html.replace('<link rel="stylesheet" href="style.css" />', "")
+    index_html = index_html.replace('<script src="main.js"></script>', "")
+    index_html = index_html.replace("</head>", f"<style>{css_text}</style></head>")
+    index_html = index_html.replace("</body>", f"<script>{js_text}</script></body>")
 
-        c4, c5 = st.columns(2)
-        with c4:
-            if st.button("⬇️ 한 칸 내리기"):
-                if can_move(
-                    st.session_state.board,
-                    st.session_state.current_shape,
-                    st.session_state.current_row + 1,
-                    st.session_state.current_col,
-                ):
-                    st.session_state.current_row += 1
-                    st.session_state.lock_pending = False
-                    st.session_state.lock_start = 0.0
-                else:
-                    # 수동 내리기에서도 바닥에 닿으면 한 번의 락 딜레이를 주고,
-                    # 그 이후 다시 내리면 고정
-                    now = time.time()
-                    lock_delay = 0.4
-                    if not st.session_state.lock_pending:
-                        st.session_state.lock_pending = True
-                        st.session_state.lock_start = now
-                    elif now - st.session_state.lock_start >= lock_delay:
-                        lock_piece()
-        with c5:
-            if st.button("⤵️ 하드 드롭"):
-                hard_drop()
-
-        if st.session_state.game_over:
-            st.error("게임 오버! '새 게임 시작'을 눌러 다시 시작하세요.")
+    components.html(index_html, height=820, scrolling=False)
 
 
 if __name__ == "__main__":
