@@ -3,6 +3,10 @@ import time
 from typing import List, Tuple
 
 import streamlit as st
+try:
+    from streamlit_autorefresh import st_autorefresh
+except Exception:  # Streamlit Cloud에서 패키지 설치가 실패하면 여기로 올 수 있음
+    st_autorefresh = None
 
 
 # ==== 기본 설정 ====
@@ -264,7 +268,10 @@ def main():
     ensure_state()
 
     # 자동 tick
-    st.experimental_set_query_params(ts=str(time.time()))
+    # Streamlit Cloud에서 experimental API가 없을 수 있어 안전하게 처리합니다.
+    # st_autorefresh로 주기적으로 앱을 rerun시키고, tick()은 last_tick/fall_interval로 실제 낙하 속도를 제어합니다.
+    if st_autorefresh is not None:
+        st_autorefresh(interval=100, limit=None, key="tetris_autorefresh")
     tick()
 
     col1, col2 = st.columns([3, 1])
