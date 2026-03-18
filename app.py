@@ -113,6 +113,37 @@ def init_state():
     st.session_state.lock_start = 0.0
 
 
+def ensure_state():
+    """코드 변경으로 세션 상태 키가 누락됐을 때도 안전하게 초기화."""
+    if "board" not in st.session_state:
+        init_state()
+        return
+
+    # 새로운 기능(락 딜레이 등) 추가 후, 기존 세션에는 키가 없을 수 있음
+    if "current_shape" not in st.session_state:
+        shape, row, col, color_id = spawn_piece()
+        st.session_state.current_shape = shape
+        st.session_state.current_row = row
+        st.session_state.current_col = col
+        st.session_state.current_color = color_id
+
+    if "score" not in st.session_state:
+        st.session_state.score = 0
+    if "level" not in st.session_state:
+        st.session_state.level = 1
+    if "lines" not in st.session_state:
+        st.session_state.lines = 0
+    if "game_over" not in st.session_state:
+        st.session_state.game_over = False
+    if "last_tick" not in st.session_state:
+        st.session_state.last_tick = time.time()
+
+    if "lock_pending" not in st.session_state:
+        st.session_state.lock_pending = False
+    if "lock_start" not in st.session_state:
+        st.session_state.lock_start = 0.0
+
+
 def draw_board():
     cell_size = 20
     canvas_width = BOARD_COLS * cell_size
@@ -230,8 +261,7 @@ def main():
         "초중급용 테트리스입니다. 바닥에 닿았을 때 살짝 좌우로 미끄러뜨릴 수 있게 만들어 더 역동적으로 플레이할 수 있어요."
     )
 
-    if "board" not in st.session_state:
-        init_state()
+    ensure_state()
 
     # 자동 tick
     st.experimental_set_query_params(ts=str(time.time()))
