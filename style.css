@@ -48,6 +48,7 @@ body {
   gap: 24px;
   align-items: flex-start;
   justify-content: center;
+  flex-wrap: nowrap;
 }
 
 #board {
@@ -178,17 +179,17 @@ body {
 
 @media (max-width: 900px) {
   .page {
-    width: 100%;
+    width: 960px;
     padding: 16px;
   }
 
   .game-container {
-    flex-direction: column;
-    align-items: center;
+    flex-direction: row;
+    align-items: flex-start;
   }
 
   .side-panel {
-    width: 280px;
+    width: 220px;
   }
 }
 

@@ -242,8 +242,8 @@ function spawnFirework(cleared, clearedRows, colorId) {
   const color = COLORS[colorId] || "#ffffff";
   const nowTs = performance.now();
   const gravity = BLOCK_SIZE * 4.2;
-  // 플래시 세기: 1줄 약하게, 2~3줄 확실히 크게
-  const flashStrength = Math.min(1, 0.25 + cleared * 0.18); // 1->0.43, 2->0.61, 3->0.79, 4->0.97
+  // 플래시 세기: 1줄은 약간, 2~3줄은 확실히, 4줄은 크게
+  const flashStrength = 0.9 + cleared * 0.6; // 1->1.5, 2->2.1, 3->2.7, 4->3.3
 
   const effect = {
     startTs: nowTs,
@@ -259,15 +259,15 @@ function spawnFirework(cleared, clearedRows, colorId) {
     const cy = rowIdx * BLOCK_SIZE + BLOCK_SIZE / 2 + (Math.random() * 2 - 1) * baseYJitter;
     for (let i = 0; i < perRow; i++) {
       const angle = Math.random() * Math.PI * 2;
-      const speedMul = 1.25 + Math.random() * (1.0 + cleared * 0.25);
-      const speed = (BLOCK_SIZE / 7) * speedMul;
+      const speedMul = 1.7 + Math.random() * (1.0 + cleared * 0.4);
+      const speed = (BLOCK_SIZE / 5.5) * speedMul;
       const p = {
         x0: cx,
         y0: cy,
         vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed * 0.92,
+        vy: Math.sin(angle) * speed * 0.95,
         g: gravity * (0.7 + Math.random() * 0.7),
-        size: 2.4 + Math.random() * (2.8 + cleared * 0.25),
+        size: 3.0 + Math.random() * (3.4 + cleared * 0.3),
         color,
       };
       effect.particles.push(p);
@@ -334,13 +334,39 @@ function drawEffects(nowTs) {
     // 짧은 플래시(“팍”)
     if (age <= FLASH_DURATION_MS) {
       const ft = age / FLASH_DURATION_MS; // 0..1
-      const a = (1 - ft) * 0.52 * e.flashStrength;
-      boardCtx.globalAlpha = a;
-      boardCtx.fillStyle = COLORS[e.colorId] || "#ffffff";
+      const a = Math.min(1, (1 - ft) * 0.95 * e.flashStrength);
+
+      // 살짝 흔들리는 “팍” 느낌
+      const shake = (1 - ft) * (1.0 + e.flashStrength * 0.25);
+      const jx = (Math.random() - 0.5) * 3.2 * shake;
+      const jy = (Math.random() - 0.5) * 1.6 * shake;
+
+      boardCtx.save();
+      boardCtx.translate(jx, jy);
+
       for (const r of e.flashRows) {
-        // 줄 폭만큼 크게 칠해서 팍 터지는 느낌
-        boardCtx.fillRect(0, r * BLOCK_SIZE, boardCanvas.width, BLOCK_SIZE);
+        const y = r * BLOCK_SIZE;
+        // 1) 하얀 플래시(전체 줄)
+        boardCtx.globalAlpha = a;
+        boardCtx.fillStyle = "#ffffff";
+        boardCtx.fillRect(0, y - 2, boardCanvas.width, BLOCK_SIZE + 4);
+
+        // 2) 색깔 코어(전체 줄)
+        boardCtx.globalAlpha = a * 0.7;
+        boardCtx.fillStyle = COLORS[e.colorId] || "#ffffff";
+        boardCtx.fillRect(0, y, boardCanvas.width, BLOCK_SIZE);
+
+        // 3) 굵은 테두리/스트로크로 팡! 강조
+        boardCtx.globalAlpha = a * 0.9;
+        boardCtx.strokeStyle = "#ffffff";
+        boardCtx.lineWidth = 4;
+        boardCtx.beginPath();
+        boardCtx.moveTo(0, y + BLOCK_SIZE / 2);
+        boardCtx.lineTo(boardCanvas.width, y + BLOCK_SIZE / 2);
+        boardCtx.stroke();
       }
+
+      boardCtx.restore();
     }
 
     for (const p of e.particles) {
@@ -352,7 +378,7 @@ function drawEffects(nowTs) {
       const a = Math.min(1, alpha * 1.25);
       boardCtx.globalAlpha = a;
       boardCtx.fillStyle = p.color;
-      const s = p.size * (0.7 + alpha * 0.95);
+      const s = p.size * (0.75 + alpha * 1.05);
       const r = s / 2;
       boardCtx.beginPath();
       boardCtx.arc(x + r, y + r, r, 0, Math.PI * 2);

@@ -285,7 +285,7 @@ def main():
     index_html = index_html.replace("</head>", f"<style>{css_text}</style></head>")
     index_html = index_html.replace("</body>", f"<script>{js_text}</script></body>")
 
-    components.html(index_html, height=980, scrolling=False)
+    components.html(index_html, height=980, width=960, scrolling=False)
 
 
 if __name__ == "__main__":
